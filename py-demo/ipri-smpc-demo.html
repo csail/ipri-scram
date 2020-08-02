@@ -1,0 +1,673 @@
+<html>
+
+<head>
+    <title>IPRI Secure Computation Client</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link rel="stylesheet" type="text/css" href="./css/main.css" charset="utf-8">
+    <link rel="stylesheet" type="text/css" href="./css/normalize.css" charset="utf-8" />
+    <link rel="stylesheet" type="text/css" href="./css/demo.css" charset="utf-8" />
+    <link rel="stylesheet" type="text/css" href="./css/component.css" charset="utf-8" />
+    <!-- <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous"> -->
+    <!-- <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous"> -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+    <!-- <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script> -->
+    <!-- <script src="/js/modernizr.custom.js"></script> -->
+    <!-- <script type="text/javascript" src="./js/modernizr.custom.js" charset="utf-8"></script> -->
+    <style type="text/css">
+        .centerText {
+            text-align: center;
+        }
+
+        .centerTextNoWrap {
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .flushRight {
+            text-align: right;
+        }
+    </style>
+</head>
+<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js"></script>
+<script type="text/javascript">
+    var $SCRIPT_ROOT = '{{ request.script_name }}'
+</script>
+<script type="text/javascript">
+/*
+Global data for easy access
+*/
+
+// var BUTTONS = [];
+// var KEYGEN_BUTTON = null;
+// var ENCRYPT_BUTTON = null;
+// var SEND_BUTTON = null;
+// var DECRYPT_BUTTON = null;
+
+var NUM_CLIENTS = 1;  // Number of clients in the demo
+var PUBKEY = [];  // The shares public key of the clients
+
+var CACHED_FILE_EVENT = null;
+var ORIGVAL = null;  // The client's original data value
+var CT = [];  // The client's ciphertext
+
+var CTR = [];  // encrypted computation result
+var RESULT = [];  // the result of the computation
+
+/*
+Websocket setup and message handling
+*/
+
+  function processMessage(message) {
+      var msgType = message.msg;
+      // console.log(msgType);
+      if (msgType == "PUBKEY") {
+          console.log("Received shared public key from the server.");
+          NUM_CLIENTS = Number(decodeURIComponent(escape(message.numClients)));
+          PUBKEY = []
+          var pka = decodeURIComponent(escape(message.pka));
+          var pkb = decodeURIComponent(escape(message.pkb));
+          PUBKEY.push(pka);
+          PUBKEY.push(pkb);
+          document.getElementById('encrypt_button').disabled = false;
+
+          document.getElementById("keyGenSpan").innerHTML = "View Shared Key";
+          document.getElementById("keyGenInnerButton").onclick = viewKey;
+          document.getElementById('keyGenInnerButton').disabled = false;
+          document.getElementById('waiting-hint').style.visibility = 'hidden';
+      }
+      else if (msgType == "ENCRESULT") {
+          console.log("Received encrypted result from the server");
+          CTR = [];
+          var cta = decodeURIComponent(escape(message.cta));
+          var ctb = decodeURIComponent(escape(message.ctb));
+          CTR.push(cta);
+          CTR.push(ctb);
+          document.getElementById('decryptInnerButton').disabled = false;
+
+          document.getElementById("sendDataInnerButton").onclick = viewEncResult;
+          document.getElementById("sendDataSpan").innerHTML = "View Encrypted Result";
+          document.getElementById('sendDataInnerButton').disabled = false;
+          document.getElementById('encrypt_button').disabled = true;
+          document.getElementById("encButtonSpan").innerHTML = "Ciphertext sent";
+      }
+      else if (msgType == "RESULT") {
+          console.log("Received final result");
+          var resString = decodeURIComponent(escape(message.result));
+          var hhiString = decodeURIComponent(escape(message.hhi));
+
+          resString = resString.split('[')[1].split(']')[0]
+          hhiString = hhiString.split('[')[1].split(']')[0]
+
+          resString = resString.split(',');
+          hhiString = hhiString.split(',');
+
+          for (let i = 0; i < resString.length; i++) {
+              resString[i] = resString[i].split("'")[1]
+              // hhiString[i] = hhiString[i].split("'")[1]
+          }
+
+          RESULT.push(resString);
+          RESULT.push(hhiString);
+
+          // document.getElementById("decryptSpan").innerHTML = "Start New Computation";
+          document.getElementById("decryptSpan").innerHTML = "Decryption Complete";
+          document.getElementById("decryptInnerButton").disabled = true;
+          // document.getElementById("decryptInnerButton").onclick = viewResult;
+          // document.getElementById("decryptInnerButton").onclick = printTable;
+          // document.getElementById("decryptInnerButton").onclick = startNewComp;
+          // DECRYPT_BUTTON.disabled = false;
+
+          // document.getElementById("resetButton").disabled = false;
+          // document.getElementById("resetButton").style.visibility = 'visible';
+
+          // document.getElementById("resultHeader").innerHTML = "RESULT";
+          document.getElementById("resetButton").disabled = false;
+
+          printTable();
+      }
+  };
+
+  var sockAddr = 'ws://' + window.location.href.toString().split('/')[2] + '/websocket';
+  var webSock = new WebSocket(sockAddr);
+
+  window.onbeforeunload = function() {
+    webSock.close();
+  };
+
+  webSock.onopen = function() {
+    // document.getElementById('wsConnect').innerHTML = "WebSocket connected to server";
+  };
+
+  webSock.onmessage = function(sockPacket) {
+    console.log("Received message from server");
+    var message = decodeURIComponent(escape(sockPacket.data));
+    message = JSON.parse(message);
+    processMessage(message);
+  };
+
+
+/*
+Button functions:text
+    posting data to server
+    viewing results
+*/
+
+  function callService(serviceName, callBack={}, data={}) {
+    $.getJSON($SCRIPT_ROOT + serviceName, data, callBack);
+    return false;
+  };
+
+
+  function resetUI() {
+      // document.getElementById("keyGenSpan").innerHTML = "Generate Shared Key";
+      document.getElementById('keyGenInnerButton').disabled = true;
+      document.getElementById('waiting-hint').style.visibility = 'hidden';
+
+      document.getElementById('encrypt_button').disabled = true;
+      document.getElementById("encButtonSpan").innerHTML = "Encrypt Data";
+      document.getElementById('encInput').value = null;
+      document.getElementById('encFileInput').value = null;
+
+      document.getElementById("encError").innerHTML = "";
+      document.getElementById("encError").color = "red";
+
+      document.getElementById('viewCtButton').disabled = true;
+      document.getElementById('viewCtButton').style.visibility = 'hidden';
+      document.getElementById('viewOrigButton').disabled = true;
+      document.getElementById('viewOrigButton').style.visibility = 'hidden';
+
+      document.getElementById('sendDataInnerButton').disabled = true;
+      document.getElementById("sendDataInnerButton").onclick = sendData;
+      document.getElementById("sendDataSpan").innerHTML = "Send Ciphertext to Server";
+
+      document.getElementById('decryptInnerButton').disabled = true;
+      document.getElementById("decryptInnerButton").onclick = decrypt;
+      document.getElementById("decryptSpan").innerHTML = "Authorize Decryption";
+
+      // document.getElementById("resultHeader").innerHTML = "";
+      document.getElementById("resultTable").innerHTML = "";
+      document.getElementById('result-empty-hint').style.visibility = 'visible';
+
+      document.getElementById("resetButton").disabled = true;
+  };
+
+  function register() {
+    // map button globals
+    // mapButtons();
+
+    resetUI();
+
+    var serviceName = 'register';
+    var callBack = function(data) {
+      var result = decodeURIComponent(escape(data.result));
+      // document.getElementById('register').innerHTML = result;
+      document.getElementById('keyGenInnerButton').disabled = false;
+      return false;
+    };
+
+    callService(serviceName, callBack);
+  };
+
+  function keyGen() {
+    console.log('Calling keygen');
+    var serviceName = 'keyGen';
+    var callBack = function(data) {
+    };
+
+    document.getElementById('keyGenInnerButton').disabled = true;
+    document.getElementById("keyGenSpan").innerHTML = "Waiting for other clients...";
+    document.getElementById('waiting-hint').style.visibility = 'visible';
+    callService(serviceName, callBack);
+  };
+
+  function viewKey() {
+    alert("Public key: " + PUBKEY);
+  };
+
+  function encryptFile(evt, callBack) {
+    var file = evt.target.files[0];
+    console.log(file);
+    if (file) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var contents = e.target.result;
+            contents = contents.split('\n');
+            contents = contents.slice(1)
+            // console.log(contents);
+            contents = contents.slice(0, contents.length-1);
+            // console.log(contents);
+            contents = contents.join(" ");
+            // console.log(contents);
+            ORIGVAL = contents;
+            callService('encryptVector', callBack, {"data": contents});
+        };
+        reader.readAsText(file);
+        return true;
+    } else {
+        return false;
+    }
+  };
+
+  function encrypt() {
+    // console.log('Calling encrypt');
+    // var serviceName = 'encrypt';
+    var callBack = function(data) {
+        CT = []
+        CT.push(data.cta);
+        CT.push(data.ctb);
+
+        document.getElementById("encError").color = "green";
+        document.getElementById("encError").innerHTML = "Data encrypted";
+        document.getElementById('viewCtButton').style.visibility = 'visible';
+        document.getElementById('viewCtButton').disabled = false;
+        document.getElementById('viewOrigButton').style.visibility = 'visible';
+        document.getElementById('viewOrigButton').disabled = false;
+
+        document.getElementById('sendDataInnerButton').disabled = false;
+
+        document.getElementById('encInput').value = null;
+        document.getElementById('encFileInput').value = null;
+    };
+
+    if (CACHED_FILE_EVENT != null) {
+        if (encryptFile(CACHED_FILE_EVENT, callBack)) {
+            return false;
+        }
+    }
+
+    document.getElementById("encError").color = "red";
+    var inputObj = document.getElementById('encInput');
+    if (inputObj.value == null || inputObj.value == "") {
+        document.getElementById('encError').innerHTML = "Please enter a value to encrypt";
+        return false;
+    }
+
+    var encData = document.getElementById('encInput').value;
+    var encInt = Number(encData);
+    var maxVal = 230000;
+    if (Number.isInteger(encInt)) {
+        // document.getElementById('encError').innerHTML = "";
+        if(encInt <= maxVal) {
+            ORIGVAL = encData;
+            callService('encryptVector', callBack, {'data' : encData});
+        } else {
+            document.getElementById('encError').innerHTML = "Value is too large. Maximum value is " + maxVal.toString();
+        }
+    } else {
+        document.getElementById('encError').innerHTML = "Value must be an integer.";
+    }
+
+
+  };
+
+  function viewCt() {
+    alert("Encrypted data: " + CT);
+  };
+
+  function viewOrigData() {
+    alert("Original value: " + ORIGVAL);
+  };
+
+  function sendData() {
+    console.log('Sending data to server...');
+    var serviceName = 'sendData';
+    var callBack = function(data) {
+    };
+
+    document.getElementById('sendDataInnerButton').disabled = true;
+    document.getElementById("sendDataSpan").innerHTML = "Waiting for other clients...";
+    document.getElementById('encrypt_button').disabled = true;
+    document.getElementById("encButtonSpan").innerHTML = "Ciphertext sent";
+    callService(serviceName, callBack);
+  };
+
+  function viewEncResult() {
+    alert("Encrypted result: " + CTR);
+  };
+
+  function decrypt() {
+    console.log('Authorizing decrypt');
+    var callBack = function(data) {
+    };
+    document.getElementById('decryptInnerButton').disabled = true;
+    document.getElementById("decryptSpan").innerHTML = "Waiting for other clients...";
+    callService('decrypt', callBack)
+  };
+
+  function startNewComp() {
+      // Reset Data
+      CACHED_FILE_EVENT = null;
+      ORIGVAL = null;
+      CT = [];
+      CTR = [];
+      RESULT = [];
+
+      // Reset UI
+      resetUI();
+
+      var callBack = function() {
+          keyGen();
+          document.querySelector('.startScrollTarget').scrollIntoView({
+            behavior: 'smooth'
+          });
+      }
+
+      // Reset Server State
+      callService("reset", callBack);
+  };
+
+  function stringTrunc(strVal, digs) {
+    var val = parseFloat(strVal);
+    var scale = Math.pow(10, digs);
+    val = Math.round(val * scale) / scale;
+    return val.toString();
+  };
+
+  function printTable() {
+
+    var html = "<table border='1|1' width='400' bgcolor=ffffff>";
+    html += "<tr> <th class=centerText>Average</th> <th class=centerText> HHI (normalized) </th> </tr>";
+    for (var i = 0; i < RESULT[0].length; i++) {
+        html+="<tr>";
+        html+="<td class=centerText>"+stringTrunc(RESULT[0][i], 4)+"</td>";
+        html+="<td class=centerText>"+stringTrunc(RESULT[1][i], 8)+"</td>";
+
+        html+="</tr>";
+
+    }
+    html+="</table>";
+    document.getElementById("resultTable").innerHTML = html;
+    document.getElementById('result-empty-hint').style.visibility = 'hidden';
+    document.querySelector('.resultScrollTarget').scrollIntoView({
+      behavior: 'smooth'
+    });
+  };
+
+</script>
+
+<body onload="register()">
+    <header>
+      <img src="img/IPRI.svg">
+    </header>
+    <div class="title-wrapper">
+      <h1>IPRI Secure Computation Platform</h1>
+    </div>
+    <!-- <span style="visibility: hidden;" id=register>Not registered.</span> -->
+    <div class="row section" id='first-section'>
+      <div class="column">
+        <h2 class="center-text">Step 1 - Start</h2>
+        <div class="section-body">
+          <div class="column">
+            <div>
+              <button class="styled-button" type="button" onclick=keyGen() disabled=true id="keyGenInnerButton">
+                <div class="icon-wrapper">
+                  <svg class="svg-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 1 511 511.99998">
+                    <g id="surface1">
+                      <path d="M 463.703125 48.792969 C 432.238281 17.328125 390.347656 0 345.746094 0 C 301.160156 0 259.273438 17.332031 227.800781 48.804688 C 196.332031 80.273438 179 122.160156 179 166.75 C 179 181.867188 181.324219 198.007812 186.089844 215.910156 L 5.828125 396.171875 C 2.394531 399.605469 0.5 404.171875 0.5 409.03125 L 0.5 493.820312 C 0.5 503.84375 8.65625 512 18.679688 512 L 101.621094 512 C 111.644531 512 119.800781 503.84375 119.800781 493.820312 L 119.800781 458.449219 L 155.171875 458.449219 C 165.195312 458.449219 173.347656 450.292969 173.347656 440.269531 L 173.347656 404.898438 L 210.566406 404.898438 C 215.421875 404.898438 219.984375 403.011719 223.421875 399.574219 L 296.433594 326.566406 C 312.804688 331.167969 329.363281 333.5 345.746094 333.5 C 390.335938 333.5 432.226562 316.167969 463.695312 284.699219 C 495.167969 253.226562 512.496094 211.339844 512.496094 166.75 C 512.5 122.152344 495.171875 80.257812 463.703125 48.792969 Z M 442.449219 263.449219 C 416.652344 289.246094 382.3125 303.449219 345.75 303.449219 C 329.929688 303.449219 314.519531 300.964844 298.640625 295.847656 C 292.113281 293.746094 285.054688 295.449219 280.210938 300.292969 L 205.652344 374.851562 L 161.476562 374.851562 C 151.453125 374.851562 143.300781 383.003906 143.300781 393.027344 L 143.300781 428.402344 L 107.929688 428.402344 C 97.90625 428.402344 89.75 436.554688 89.75 446.578125 L 89.75 481.949219 L 30.550781 481.949219 L 30.550781 413.949219 L 212.257812 232.242188 C 216.953125 227.539062 218.707031 220.65625 216.835938 214.277344 C 211.597656 196.40625 209.050781 180.859375 209.050781 166.75 C 209.050781 130.1875 223.253906 95.847656 249.050781 70.050781 C 274.84375 44.257812 309.1875 30.050781 345.746094 30.050781 C 382.320312 30.050781 416.667969 44.253906 442.457031 70.042969 C 468.246094 95.832031 482.449219 130.175781 482.449219 166.75 C 482.449219 203.3125 468.242188 237.65625 442.449219 263.449219 Z M 442.449219 263.449219 " style=" stroke:none;fill-rule:nonzero;fill-opacity:1;" />
+                      <path d="M 345.84375 74.363281 C 295.886719 74.363281 255.246094 115.003906 255.246094 164.957031 C 255.246094 214.910156 295.886719 255.550781 345.84375 255.550781 C 395.796875 255.550781 436.433594 214.910156 436.433594 164.957031 C 436.433594 115.003906 395.796875 74.363281 345.84375 74.363281 Z M 345.84375 225.5 C 312.457031 225.5 285.296875 198.339844 285.296875 164.957031 C 285.296875 131.574219 312.457031 104.414062 345.84375 104.414062 C 379.226562 104.414062 406.386719 131.574219 406.386719 164.957031 C 406.386719 198.339844 379.226562 225.5 345.84375 225.5 Z M 345.84375 225.5 " style=" stroke:none;fill-rule:nonzero;fill-opacity:1;" />
+                    </g>
+                  </svg>
+                </div>
+                <span id="keyGenSpan">Generate Shared Key</span>
+              </button>
+            </div>
+            <div class="hint" id="waiting-hint" style="visibility: hidden;">
+              Waiting on last participant to click generate shared key
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ROW 2: Input Data -->
+    <div class="row section" id="second-section">
+      <div class="column">
+        <h2 class="center-text, startScrollTarget">Step 2 - Input and Encrypt Data</h2>
+        <div class="section-body" style="padding-top:5px;">
+          <div class="row flexible">
+            <div class="column">
+              <h4>Input value</h4>
+              <input type="text" class="styled-input" id='encInput' placeholder="Please enter an integer" />
+              <br>
+              <p id=encError> </p>
+            </div>
+            <div class="or">OR</div>
+            <div class="column">
+              <h4>Encrypt CSV</h4>
+              <input class="hidden-input" type="file" id="encFileInput" placeholder="Upload">
+              <label for="encFileInput" class="styled-button" >
+                <div class="icon-wrapper">
+                  <svg id="Capa_1" viewBox="0 0 511.999 511.999" class="svg-icon">
+                  <g>
+                  	<g>
+                  		<path d="M394.584,116.029c-15.51,0-30.882,3.097-45.105,9.005c-26.819-40.879-72.295-65.739-121.862-65.739
+                  			c-31.953,0-62.292,10.148-87.735,29.347c-21.664,16.348-38.528,38.773-48.288,63.947C40.428,156.526,0,199.418,0,251.576
+                  			c0,54.744,44.538,99.283,99.283,99.283h16.294c11.932,58.053,63.428,101.846,124.961,101.846s113.028-43.791,124.96-101.846
+                  			h25.764c0.563,0,1.116-0.037,1.662-0.097c0.546,0.06,1.1,0.097,1.661,0.097c64.743,0,117.415-52.672,117.415-117.415
+                  			S459.328,116.029,394.584,116.029z M240.538,422.712c-53.803,0-97.574-43.771-97.574-97.574s43.771-97.574,97.574-97.574
+                  			c53.802,0,97.574,43.771,97.574,97.574C338.11,378.941,294.339,422.712,240.538,422.712z M394.584,320.866
+                  			c-0.563,0-1.116,0.037-1.662,0.097c-0.546-0.06-1.1-0.097-1.662-0.097h-23.238c-2.262-68.37-58.576-123.294-127.486-123.294
+                  			s-125.224,54.924-127.487,123.294H99.283c-38.207,0-69.292-31.084-69.292-69.291s31.084-69.29,69.292-69.29
+                  			c0.532,0,1.057-0.03,1.575-0.084c0.509,0.052,1.017,0.088,1.522,0.088c6.443,0,12.398-4.187,14.352-10.674
+                  			c7.024-23.313,21.661-44.278,41.216-59.033c20.198-15.241,44.289-23.296,69.67-23.296c43.252,0,82.592,23.829,102.666,62.186
+                  			c3.84,7.338,12.902,10.173,20.24,6.333c0.196-0.102,0.375-0.223,0.565-0.333c0.486-0.204,0.966-0.433,1.438-0.692
+                  			c12.799-7.04,27.343-10.76,42.06-10.76c48.205,0,87.423,39.218,87.423,87.423S442.79,320.866,394.584,320.866z"/>
+                  	</g>
+                  </g>
+                  <g>
+                  	<g>
+                  		<path d="M279.907,298.487l-28.761-28.762c-0.002-0.002-0.003-0.003-0.005-0.005c-0.013-0.013-0.028-0.024-0.042-0.038
+                  			c-0.337-0.335-0.69-0.654-1.057-0.955c-0.175-0.144-0.36-0.269-0.541-0.404c-0.212-0.158-0.418-0.322-0.638-0.469
+                  			c-0.019-0.013-0.036-0.028-0.055-0.04c-0.197-0.131-0.403-0.24-0.605-0.36c-0.199-0.119-0.394-0.244-0.598-0.354
+                  			c-0.226-0.121-0.459-0.224-0.69-0.333c-0.213-0.1-0.421-0.206-0.639-0.297c-0.226-0.094-0.457-0.169-0.686-0.251
+                  			c-0.232-0.083-0.461-0.172-0.699-0.244c-0.232-0.07-0.467-0.122-0.701-0.18c-0.24-0.06-0.478-0.128-0.722-0.176
+                  			c-0.273-0.054-0.548-0.087-0.823-0.126c-0.21-0.03-0.416-0.07-0.628-0.091c-0.986-0.097-1.978-0.097-2.964,0
+                  			c-0.212,0.021-0.418,0.061-0.628,0.091c-0.275,0.039-0.55,0.071-0.823,0.126c-0.245,0.049-0.482,0.116-0.722,0.176
+                  			c-0.234,0.059-0.469,0.11-0.701,0.18c-0.237,0.072-0.466,0.161-0.699,0.244c-0.229,0.082-0.46,0.158-0.686,0.251
+                  			c-0.218,0.09-0.427,0.197-0.639,0.297c-0.231,0.109-0.464,0.211-0.69,0.333c-0.205,0.11-0.399,0.235-0.598,0.354
+                  			c-0.221,0.132-0.444,0.256-0.659,0.401c-0.223,0.149-0.432,0.315-0.647,0.475c-0.177,0.133-0.359,0.256-0.532,0.398
+                  			c-0.365,0.3-0.715,0.617-1.05,0.949c-0.016,0.016-0.033,0.028-0.049,0.044l-28.766,28.766c-5.856,5.856-5.856,15.351,0,21.207
+                  			c2.929,2.928,6.766,4.393,10.604,4.393c3.837,0,7.676-1.465,10.603-4.392l3.167-3.167v56.071c0,8.282,6.714,14.996,14.996,14.996
+                  			c8.282,0,14.996-6.714,14.996-14.996v-56.071l3.166,3.166c2.928,2.928,6.766,4.393,10.603,4.393s7.676-1.464,10.603-4.393
+                  			C285.763,313.838,285.763,304.344,279.907,298.487z"/>
+                  	</g>
+                  </g>
+                  </svg>
+
+                </div>
+                <span>Upload a CSV file</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="row full-width" id="third-section">
+          <div class="column purple" style="padding: 15px; padding-top:35px;">
+            <div>
+              <button class="styled-button" id="encrypt_button" type="button" onclick="encrypt()">
+                <div class="icon-wrapper">
+                  <svg class="svg-icon" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="-38 1 511 511.99976">
+                    <g id="surface1">
+                      <path d="M 435.988281 138.914062 L 435.972656 138.519531 C 435.75 133.601562 435.601562 128.394531 435.511719 122.605469 C 435.09375 94.375 412.652344 71.023438 384.417969 69.449219 C 325.550781 66.160156 280.011719 46.964844 241.101562 9.042969 L 240.769531 8.726562 C 228.074219 -2.910156 208.929688 -2.90625 196.242188 8.722656 L 195.90625 9.042969 C 156.996094 46.964844 111.457031 66.160156 52.589844 69.449219 C 24.355469 71.023438 1.914062 94.375 1.496094 122.609375 C 1.410156 128.363281 1.257812 133.566406 1.035156 138.519531 L 1.011719 139.445312 C -0.132812 199.472656 -1.554688 274.175781 23.4375 341.988281 C 37.179688 379.277344 57.988281 411.691406 85.289062 438.332031 C 116.386719 468.675781 157.113281 492.765625 206.347656 509.933594 C 207.949219 510.492188 209.609375 510.945312 211.300781 511.28125 C 213.691406 511.761719 216.097656 512 218.503906 512 C 220.910156 512 223.320312 511.761719 225.707031 511.28125 C 227.398438 510.945312 229.070312 510.488281 230.6875 509.925781 C 279.855469 492.730469 320.539062 468.628906 351.605469 438.289062 C 378.894531 411.636719 399.707031 379.210938 413.460938 341.917969 C 438.546875 273.902344 437.128906 199.054688 435.988281 138.914062 Z M 385.273438 331.519531 C 358.914062 402.992188 305.105469 452.070312 220.777344 481.558594 C 220.476562 481.664062 220.152344 481.753906 219.820312 481.820312 C 218.945312 481.996094 218.058594 481.996094 217.179688 481.816406 C 216.847656 481.753906 216.53125 481.664062 216.234375 481.5625 C 131.8125 452.125 77.96875 403.070312 51.625 331.597656 C 28.589844 269.09375 29.898438 200.519531 31.050781 140.015625 L 31.054688 139.683594 C 31.289062 134.480469 31.449219 129.039062 31.535156 123.050781 C 31.722656 110.515625 41.707031 100.148438 54.265625 99.445312 C 87.578125 97.585938 116.84375 91.148438 143.734375 79.765625 C 170.585938 68.398438 194.441406 52.375 216.644531 30.78125 C 217.769531 29.828125 219.238281 29.824219 220.363281 30.78125 C 242.570312 52.375 266.421875 68.402344 293.273438 79.765625 C 320.164062 91.148438 349.429688 97.585938 382.746094 99.445312 C 395.304688 100.148438 405.289062 110.515625 405.472656 123.054688 C 405.5625 129.074219 405.71875 134.515625 405.953125 139.679688 C 407.097656 200.253906 408.375 268.882812 385.273438 331.519531 Z M 385.273438 331.519531 " style=" stroke:none;fill-rule:nonzero;fill-opacity:1;" />
+                      <path d="M 218.496094 149.601562 C 180.996094 149.601562 150.492188 180.109375 150.492188 217.605469 C 150.492188 239.707031 161.105469 260.089844 178.710938 272.769531 L 178.363281 321.339844 L 178.363281 321.445312 C 178.363281 343.460938 196.273438 361.375 218.289062 361.375 C 240.285156 361.375 258.183594 343.492188 258.21875 321.503906 L 258.570312 272.554688 C 275.996094 259.855469 286.5 239.550781 286.5 217.605469 C 286.5 180.109375 255.992188 149.601562 218.496094 149.601562 Z M 228.171875 321.449219 C 228.171875 326.898438 223.738281 331.332031 218.289062 331.332031 C 212.855469 331.332031 208.429688 326.917969 208.40625 321.488281 L 208.8125 265.601562 C 209.230469 259.832031 206.28125 254.089844 200.835938 251.21875 C 188.3125 244.621094 180.535156 231.742188 180.535156 217.605469 C 180.535156 196.675781 197.5625 179.648438 218.496094 179.648438 C 239.425781 179.648438 256.453125 196.675781 256.453125 217.605469 C 256.453125 231.644531 248.753906 244.480469 236.359375 251.109375 C 230.679688 254.148438 227.761719 260.316406 228.570312 266.351562 L 228.171875 321.339844 Z M 228.171875 321.449219 " style=" stroke:none;fill-rule:nonzero;fill-opacity:1;" />
+                    </g>
+                  </svg>
+                </div>
+                <span id="encButtonSpan">Encrypt Data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="row full-width" id="fourth-section">
+          <div class="column">
+            <div class="section-body purple" style="padding-bottom:35px;padding-top:20px;">
+              <div class="row flex-center">
+                <div style="margin-right:15px;">
+                  <button class="styled-button small" type="button" onclick="viewCt()" id="viewCtButton" disabled=true>
+                    View Ciphertext
+                  </button>
+                </div>
+                <div>
+                  <button class="styled-button small" type="button" onclick="viewOrigData()" id="viewOrigButton" disabled=true>
+                    View Your Value
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ROW 3: Encryption  -->
+    <!-- ROW 4: Send Data  -->
+    <div class="row section" id='fifth-section'>
+      <div class="column">
+        <h2 class="center-text" id="sendHeader">Step 3 - Send Encrypted Data</h2>
+        <div class="section-body">
+          <div class="column">
+            <div>
+              <button class="styled-button" type="button" onclick="sendData()" id="sendDataInnerButton" disabled=true>
+                <div class="icon-wrapper">
+                  <svg class="svg-icon" viewBox="0 0 487.1 487.1">
+                  	<g>
+                  		<path d="M487.1,14.065c0-0.1,0-0.2,0-0.4c0-0.3-0.1-0.5-0.1-0.8c0-0.2,0-0.4-0.1-0.6c0-0.2-0.1-0.4-0.1-0.5
+                  			c-0.1-0.2-0.1-0.5-0.2-0.7c0-0.1-0.1-0.2-0.1-0.4c-0.1-0.3-0.2-0.6-0.3-0.9c0-0.1-0.1-0.1-0.1-0.2c-0.1-0.3-0.3-0.7-0.5-1
+                  			c0-0.1-0.1-0.2-0.1-0.2c-0.2-0.3-0.3-0.6-0.5-0.9c-0.7-1-1.5-1.9-2.4-2.7c-3.7-4.2-9.8-5.9-15.3-3.6L8.4,190.765
+                  			c-0.1,0.1-0.3,0.1-0.4,0.2c-0.3,0.1-0.5,0.2-0.8,0.4c-0.2,0.1-0.4,0.2-0.6,0.3s-0.4,0.2-0.6,0.4c-0.2,0.1-0.4,0.3-0.6,0.4
+                  			c-0.2,0.1-0.3,0.2-0.5,0.4c-0.2,0.1-0.3,0.3-0.5,0.5c-0.2,0.1-0.3,0.3-0.5,0.4c-0.2,0.2-0.3,0.3-0.5,0.5c-0.1,0.2-0.3,0.3-0.4,0.5
+                  			c-0.1,0.2-0.3,0.4-0.4,0.5c-0.1,0.2-0.3,0.3-0.4,0.5c-0.1,0.2-0.3,0.4-0.4,0.6c-0.1,0.2-0.2,0.3-0.3,0.5c-0.2,0.3-0.3,0.6-0.4,0.9
+                  			c0,0.1-0.1,0.2-0.2,0.3l0,0c-0.2,0.4-0.3,0.8-0.4,1.2c0,0,0,0,0,0.1c-0.1,0.4-0.2,0.8-0.3,1.3c0,0.2-0.1,0.4-0.1,0.6
+                  			c0,0.2-0.1,0.5-0.1,0.7s0,0.4,0,0.6c0,0.2,0,0.5,0,0.7s0,0.4,0,0.6c0,0.2,0,0.5,0,0.7s0.1,0.4,0.1,0.5c0,0.3,0.1,0.5,0.1,0.8
+                  			c0.1,0.3,0.1,0.6,0.2,0.9c0.1,0.2,0.1,0.4,0.2,0.6c0.1,0.3,0.2,0.7,0.4,1l0,0c0.1,0.4,0.3,0.7,0.5,1c0,0.1,0.1,0.2,0.1,0.2
+                  			c0.1,0.3,0.3,0.5,0.5,0.8c0.1,0.1,0.1,0.2,0.2,0.3c0.2,0.3,0.3,0.5,0.5,0.7c0.1,0.1,0.1,0.2,0.2,0.2c0.3,0.3,0.5,0.6,0.8,0.9l0,0
+                  			c0.3,0.3,0.6,0.5,0.9,0.8c0.1,0.1,0.2,0.2,0.3,0.2c0.2,0.2,0.5,0.4,0.7,0.5c0.1,0.1,0.2,0.1,0.3,0.2c0.3,0.2,0.7,0.4,1,0.6
+                  			c0.1,0,0.1,0.1,0.2,0.1c0.3,0.2,0.6,0.3,1,0.5c0.1,0,0.1,0.1,0.2,0.1l185,78.4l78.4,185c0.1,0.4,0.3,0.7,0.5,1
+                  			c0,0.1,0.1,0.2,0.1,0.2c0.2,0.3,0.3,0.5,0.5,0.8c0.1,0.1,0.1,0.2,0.2,0.3c0.2,0.3,0.4,0.5,0.5,0.7c0.1,0.1,0.1,0.2,0.2,0.2
+                  			c0.3,0.3,0.5,0.6,0.8,0.9l0.1,0.1c0.3,0.2,0.5,0.5,0.8,0.7c0.1,0.1,0.2,0.2,0.3,0.2c0.2,0.2,0.5,0.4,0.7,0.5
+                  			c0.1,0.1,0.2,0.1,0.3,0.2c0.3,0.2,0.7,0.4,1,0.6c0.1,0,0.2,0.1,0.2,0.1c0.3,0.2,0.6,0.3,0.9,0.4c0.1,0,0.1,0.1,0.2,0.1
+                  			c0,0,0.1,0,0.1,0.1c0.3,0.1,0.7,0.3,1,0.4h0.1c0.4,0.1,0.7,0.2,1.1,0.3c0.1,0,0.3,0,0.4,0.1c0.3,0,0.5,0.1,0.8,0.1
+                  			c0.1,0,0.3,0,0.4,0c0.4,0,0.7,0.1,1.1,0.1l0,0l0,0l0,0l0,0c0.4,0,0.8,0,1.1-0.1c0.1,0,0.3,0,0.4,0c0.3,0,0.6-0.1,0.8-0.1
+                  			c0.1,0,0.3,0,0.4-0.1c0.4-0.1,0.8-0.2,1.1-0.3c0.1,0,0.1,0,0.2-0.1c0.3-0.1,0.7-0.2,1-0.4c0.1,0,0.1,0,0.2-0.1
+                  			c0.1,0,0.1-0.1,0.2-0.1c0.3-0.1,0.6-0.3,0.9-0.5c0.1,0,0.1-0.1,0.2-0.1c0.3-0.2,0.7-0.4,1-0.6c0.1-0.1,0.2-0.1,0.3-0.2
+                  			c0.2-0.2,0.5-0.3,0.7-0.5c0.1-0.1,0.2-0.2,0.3-0.2c0.3-0.3,0.6-0.5,0.8-0.8l0,0c0.3-0.3,0.5-0.6,0.8-0.9c0.1-0.1,0.1-0.2,0.2-0.3
+                  			c0.2-0.2,0.4-0.5,0.5-0.7c0.1-0.1,0.1-0.2,0.2-0.3c0.2-0.3,0.3-0.5,0.5-0.8c0-0.1,0.1-0.2,0.1-0.2c0.2-0.3,0.3-0.7,0.5-1
+                  			l189.6-458.4c0.3-0.8,0.6-1.7,0.8-2.6c0.1-0.3,0.1-0.7,0.1-1c0-0.1,0-0.2,0-0.3c0-0.4,0-0.7,0.1-1.1c0-0.1,0-0.2,0-0.2
+                  			C487.1,14.665,487.1,14.365,487.1,14.065z M48.6,203.365l370.6-153l-217.8,217.7L48.6,203.365z M284,438.765l-64-151.1l215.3-215.2
+                  			L284,438.765z"/>
+                  	</g>
+                  </svg>
+                </div>
+                <span id="sendDataSpan">Send Data to Server</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- ROW 5: Decrypt  -->
+    <div class="row section" id="sixth-section">
+      <div class="column">
+        <h2 class="center-text" id="decryptionHeader">Step 4 - Authorize Decryption</h2>
+        <div class="section-body">
+          <div class="column">
+            <div>
+              <button class="styled-button" type="button" onclick="decrypt()" id="decryptInnerButton">
+                <div class="icon-wrapper">
+                  <svg class="svg-icon" viewBox="0 0 512 512">
+                  	<g>
+                  		<g>
+                  			<path d="M356.115,191.701H225.13v-60.518c0-17.022,13.849-30.87,30.87-30.87c17.022,0,30.869,13.849,30.869,30.87
+                  				c0,27.656,22.5,50.156,50.156,50.156s50.156-22.5,50.156-50.156C387.182,58.847,328.334,0,256.001,0
+                  				S124.818,58.847,124.818,131.182v67.499c-24.634,11.677-41.718,36.779-41.718,65.804v206.833c0,22.432,18.25,40.682,40.682,40.682
+                  				h264.435c22.432,0,40.682-18.25,40.682-40.682V264.485C428.899,224.352,396.249,191.701,356.115,191.701z M158.255,131.182
+                  				c0-53.896,43.849-97.745,97.745-97.745s97.744,43.849,97.744,97.745c0,9.219-7.5,16.719-16.719,16.719
+                  				c-9.219,0-16.719-7.5-16.719-16.719c0-35.459-28.847-64.308-64.307-64.308c-35.459,0-64.308,28.849-64.308,64.308v60.518h-33.437
+                  				V131.182z M395.462,471.318c0,3.995-3.25,7.245-7.245,7.245H123.783c-3.995,0-7.245-3.25-7.245-7.245V264.485
+                  				c0-18.266,12.512-33.662,29.415-38.075c7.464-1.939-6.092-1.272,210.162-1.272c21.695,0,39.347,17.65,39.347,39.347V471.318z"/>
+                  		</g>
+                  	</g>
+                  	<g>
+                  		<g>
+                  			<path d="M256.001,255.727c-36.46,0-66.123,29.662-66.123,66.122c0,17.816,7.321,34.933,19.921,47.289v31.598
+                  				c0,25.476,20.727,46.201,46.203,46.201s46.201-20.726,46.201-46.201v-31.598c12.6-12.355,19.921-29.472,19.921-47.289
+                  				C322.123,285.391,292.461,255.727,256.001,255.727z M275.496,348.087c-4.235,3.155-6.731,8.126-6.731,13.407v39.243
+                  				c0,7.039-5.726,12.764-12.764,12.764c-7.039,0-12.765-5.726-12.765-12.764v-39.243c0-5.281-2.496-10.252-6.731-13.407
+                  				c-8.383-6.245-13.19-15.807-13.19-26.236c0-18.023,14.662-32.685,32.686-32.685c18.023,0,32.685,14.662,32.685,32.685
+                  				C288.686,332.28,283.877,341.842,275.496,348.087z"/>
+                  		</g>
+                  	</g>
+                  </svg>
+                </div>
+                <span id="decryptSpan">Authorize Decryption</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- VIEW RESULT -->
+    <div class="row section">
+      <div class="column">
+        <h2 class="center-text" id="resultHeader">Step 5 - View Result</h2>
+        <div class="section-body">
+          <div class="column">
+            <div class="hint" id="result-empty-hint" style="visibility: visible;">
+              Complete the previous steps to view your results.
+            </div>
+            <div align="center" id="resultTable" class="resultScrollTarget"> </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- RESET SECTION -->
+    <div class="row section">
+      <div class="column">
+        <h2 class="center-text" id="resultHeader">Step 6 - Clear and Start Over</h2>
+        <div class="section-body">
+          <div class="column">
+            <div>
+              <button class="styled-button" type="button" onclick="startNewComp()" id="resetButton">
+                <div class="icon-wrapper">
+                  <svg class="svg-icon" viewBox="0 0 512 512">
+                    <g>
+                    	<g>
+                    		<path d="M493.815,70.629c-11.001-1.003-20.73,7.102-21.733,18.102l-2.65,29.069C424.473,47.194,346.429,0,256,0
+                    			C158.719,0,72.988,55.522,30.43,138.854c-5.024,9.837-1.122,21.884,8.715,26.908c9.839,5.024,21.884,1.123,26.908-8.715
+                    			C102.07,86.523,174.397,40,256,40c74.377,0,141.499,38.731,179.953,99.408l-28.517-20.367c-8.989-6.419-21.48-4.337-27.899,4.651
+                    			c-6.419,8.989-4.337,21.479,4.651,27.899l86.475,61.761c12.674,9.035,30.155,0.764,31.541-14.459l9.711-106.53
+                    			C512.919,81.362,504.815,71.632,493.815,70.629z"/>
+                    	</g>
+                    </g>
+                    <g>
+                    	<g>
+                    		<path d="M472.855,346.238c-9.838-5.023-21.884-1.122-26.908,8.715C409.93,425.477,337.603,472,256,472
+                    			c-74.377,0-141.499-38.731-179.953-99.408l28.517,20.367c8.989,6.419,21.479,4.337,27.899-4.651
+                    			c6.419-8.989,4.337-21.479-4.651-27.899l-86.475-61.761c-12.519-8.944-30.141-0.921-31.541,14.459l-9.711,106.53
+                    			c-1.003,11,7.102,20.73,18.101,21.733c11.014,1.001,20.731-7.112,21.733-18.102l2.65-29.069C87.527,464.806,165.571,512,256,512
+                    			c97.281,0,183.012-55.522,225.57-138.854C486.594,363.309,482.692,351.262,472.855,346.238z"/>
+                    	</g>
+                    </g>
+                  </svg>
+                </div>
+                <span id="sendDataSpan">Start Over</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+        document.getElementById('encFileInput').addEventListener(
+            'change',
+            function(e) {
+                CACHED_FILE_EVENT = e
+            },
+            false
+        )
+    </script>
+    <script src="./js/classie.js"></script>
+
+</body>
+
+</html>

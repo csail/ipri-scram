@@ -1,0 +1,47 @@
+/**
+@file encrypt.cpp  --  Part of the IPRI demo. Encrypts data from a CSV file using the input public key.
+
+NOTE: Number of CSV entries MUST not exceed the number of ciphertext slots. See demo_params.h for the number of slots.
+
+Input Format:
+data to encrypt
+pka
+pkb
+
+Output Format:
+cta
+ctb
+
+Author: Leo de Castro
+*/
+
+#include "../demo/ipri-demo/demo-params.h"
+
+using namespace std;
+using namespace lbcrypto;
+
+int main(int argc, char** argv) {
+
+    if (argc != 4) throw std::logic_error("Invalid number of arguments");
+
+    precompute_params();
+
+    // Load data to encrypt
+    // uv64 data = argToVec(argv[1]); 
+    uv64 data(test_params.phim, 0);
+    data[0] = boost::lexical_cast<ui64>(argv[1]);
+
+    // Load Public Key
+    PublicKey pk(test_params.phim);
+    pk.a = argToVec(argv[2], test_params.phim);
+    pk.b = argToVec(argv[3], test_params.phim); 
+
+    // Encrypt
+    uv64 pt = packed_encode(data, test_params.p, test_params.logn);
+    Ciphertext ct = Encrypt(pk, pt, test_params);
+
+    std::cout << vec_to_str(ct.a) << std::endl;
+    std::cout << vec_to_str(ct.b) << std::endl;
+
+}
+

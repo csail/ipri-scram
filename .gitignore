@@ -1,0 +1,5 @@
+boost/
+src/bin
+bin/
+*.swp
+*.o
